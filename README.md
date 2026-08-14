@@ -1,4 +1,4 @@
-# mqls
+# mqlv
 
 a validation harness for AI agents generating MQL5 code.
 
