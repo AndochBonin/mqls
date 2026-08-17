@@ -85,6 +85,57 @@ void OnTick()
 	}
 }
 
+// A class method sharing a handler name must not be mistaken for the global
+// event handler (top-level-only detection).
+func TestEventHandlerIgnoresClassMethod(t *testing.T) {
+	src := `
+class Strategy
+{
+public:
+   void OnTick(int x) { }
+};
+
+void OnTick() { }
+`
+	rep := Run("m.mq5", src)
+	if hasRule(rep.Findings, "event-handler/ontick-params") {
+		t.Errorf("class method OnTick(int) wrongly flagged as the global handler: %+v", rep.Findings)
+	}
+}
+
+// OnDeinit must take exactly one parameter; a second one is an error.
+func TestEventHandlerDeinitArity(t *testing.T) {
+	bad := Run("d.mq5", "void OnDeinit(const int reason, double extra) { }")
+	if !hasRule(bad.Findings, "event-handler/ondeinit-signature") {
+		t.Errorf("OnDeinit with two params should be flagged, got %+v", bad.Findings)
+	}
+
+	good := Run("d.mq5", "void OnDeinit(const int reason) { }")
+	if hasRule(good.Findings, "event-handler/ondeinit-signature") {
+		t.Errorf("correctly-signed OnDeinit should not be flagged, got %+v", good.Findings)
+	}
+}
+
+// The parameter list is extracted with balanced parens, not truncated at the
+// first ')', so a nested paren in the args is captured whole.
+func TestEventHandlerNestedParens(t *testing.T) {
+	// The bad OnInit arg list contains inner parens; the full list must be
+	// reported, proving the capture did not stop at the first ')'.
+	rep := Run("n.mq5", "int OnInit(int a = (1 + 2)) { return 0; }")
+	var msg string
+	for _, f := range rep.Findings {
+		if f.RuleID == "event-handler/oninit-params" {
+			msg = f.Message
+		}
+	}
+	if msg == "" {
+		t.Fatalf("expected event-handler/oninit-params finding, got %+v", rep.Findings)
+	}
+	if !strings.Contains(msg, "(1 + 2)") {
+		t.Errorf("nested-paren arg list truncated; message was %q", msg)
+	}
+}
+
 func TestStructuralBalance(t *testing.T) {
 	rep := Run("b.mq5", "void OnTick() { if(x) { ")
 	if !hasRule(rep.Findings, "struct/unclosed-brace") {

@@ -1,4 +1,4 @@
-package lint 
+package lint
 
 import "github.com/AndochBonin/mqls/internal/finding"
 

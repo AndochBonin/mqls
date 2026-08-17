@@ -1,5 +1,5 @@
-package lint 
- 
+package lint
+
 import "strings"
 
 // Source is the parsed view of one MQL5 file handed to every rule.
