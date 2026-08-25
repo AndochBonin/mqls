@@ -136,6 +136,18 @@ func TestEventHandlerNestedParens(t *testing.T) {
 	}
 }
 
+// The OnTester* tester callbacks all take no parameters; a param is an error.
+func TestEventHandlerTesterParams(t *testing.T) {
+	bad := Run("t.mq5", "double OnTester(int x) { return 0; }")
+	if !hasRule(bad.Findings, "event-handler/ontester-params") {
+		t.Errorf("OnTester with a param should be flagged, got %+v", bad.Findings)
+	}
+	good := Run("t.mq5", "double OnTester() { return 0; }")
+	if hasRule(good.Findings, "event-handler/ontester-params") {
+		t.Errorf("param-less OnTester should not be flagged, got %+v", good.Findings)
+	}
+}
+
 func TestStructuralBalance(t *testing.T) {
 	rep := Run("b.mq5", "void OnTick() { if(x) { ")
 	if !hasRule(rep.Findings, "struct/unclosed-brace") {

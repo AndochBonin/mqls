@@ -57,7 +57,7 @@ func balancedEmptyArgs(code string, openParen int) bool {
 // comment/string-blanked, braces inside comments or literals never count.
 func braceDepthAt(code string, i int) int {
 	depth := 0
-	for j := 0; j < i; j++ {
+	for j := range i {
 		switch code[j] {
 		case '{':
 			depth++
@@ -73,7 +73,7 @@ func (r eventHandlerRule) Check(src *Source) []finding.Finding {
 	code := src.Code
 
 	// Handlers that take no parameters.
-	for _, name := range []string{"OnTick", "OnStart"} {
+	for _, name := range []string{"OnTick", "OnStart", "OnTester", "OnTesterInit", "OnTesterDeinit", "OnTesterPass"} {
 		if args, off, ok := handlerDef(code, name); ok && strings.TrimSpace(args) != "" {
 			line, col := src.posAt(off)
 			out = append(out, finding.Finding{
