@@ -148,6 +148,28 @@ func TestEventHandlerTesterParams(t *testing.T) {
 	}
 }
 
+// Each known handler must declare its correct return type.
+func TestEventHandlerReturnTypes(t *testing.T) {
+	cases := []struct {
+		src, rule string
+		flag      bool
+	}{
+		{"double OnTester() { return 0; }", "event-handler/ontester-return", false},
+		{"int OnTester() { return 0; }", "event-handler/ontester-return", true},
+		{"void OnTick() {}", "event-handler/ontick-return", false},
+		{"int OnTick() { return 0; }", "event-handler/ontick-return", true},
+		{"int OnInit() { return 0; }", "event-handler/oninit-return", false},
+		{"void OnInit() {}", "event-handler/oninit-return", false},
+		{"double OnInit() { return 0; }", "event-handler/oninit-return", true},
+	}
+	for _, c := range cases {
+		rep := Run("r.mq5", c.src)
+		if hasRule(rep.Findings, c.rule) != c.flag {
+			t.Errorf("src %q: want flag=%v for %s, got %+v", c.src, c.flag, c.rule, rep.Findings)
+		}
+	}
+}
+
 func TestStructuralBalance(t *testing.T) {
 	rep := Run("b.mq5", "void OnTick() { if(x) { ")
 	if !hasRule(rep.Findings, "struct/unclosed-brace") {

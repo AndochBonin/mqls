@@ -68,6 +68,22 @@ func braceDepthAt(code string, i int) int {
 	return depth
 }
 
+// returnTypeOf returns the return-type token immediately preceding the handler
+// name at nameOffset (e.g. "void", "int", "double"), or "" if it can't be
+// determined — the byte before the name is punctuation (}, ;, {, )) rather than
+// an identifier. code is comment/string-blanked, so this never trips on comments.
+func returnTypeOf(code string, nameOffset int) string {
+	end := prevNonSpace(code, nameOffset-1)
+	if end < 0 || !isIdentByte(code[end]) {
+		return ""
+	}
+	start := end
+	for start >= 0 && isIdentByte(code[start]) {
+		start--
+	}
+	return code[start+1 : end+1]
+}
+
 func (r eventHandlerRule) Check(src *Source) []finding.Finding {
 	var out []finding.Finding
 	code := src.Code
@@ -113,6 +129,39 @@ func (r eventHandlerRule) Check(src *Source) []finding.Finding {
 				Pass:     finding.PassStatic,
 			})
 		}
+	}
+
+	// Each handler has a fixed expected return type. A wrong return type, like a
+	// wrong parameter list, makes the terminal skip the handler silently.
+	for _, h := range []struct{ name, want string }{
+		{"OnTick", "void"}, {"OnStart", "void"}, {"OnInit", "int"}, {"OnDeinit", "void"},
+		{"OnTester", "double"},
+		{"OnTesterInit", "void"}, {"OnTesterDeinit", "void"}, {"OnTesterPass", "void"},
+	} {
+		_, off, ok := handlerDef(code, h.name)
+		if !ok {
+			continue
+		}
+		got := returnTypeOf(code, off)
+		if got == "" || got == h.want {
+			continue // undeterminable → skip (no false positive); or already correct
+		}
+		if h.name == "OnInit" && got == "void" {
+			continue // int or void both valid for OnInit
+		}
+		line, col := src.posAt(off)
+		want := h.want
+		if h.name == "OnInit" {
+			want = "int (or void)"
+		}
+		out = append(out, finding.Finding{
+			File: src.Path, Line: line, Column: col,
+			Severity: finding.Error,
+			RuleID:   "event-handler/" + strings.ToLower(h.name) + "-return",
+			Message:  h.name + "() must return " + want + "; found \"" + got + "\".",
+			Suggest:  "Declare it as " + h.want + " " + h.name + "(...).",
+			Pass:     finding.PassStatic,
+		})
 	}
 	return out
 }
