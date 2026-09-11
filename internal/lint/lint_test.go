@@ -114,6 +114,11 @@ func TestEventHandlerDeinitArity(t *testing.T) {
 	if hasRule(good.Findings, "event-handler/ondeinit-signature") {
 		t.Errorf("correctly-signed OnDeinit should not be flagged, got %+v", good.Findings)
 	}
+
+	goodDefault := Run("d.mq5", "void OnDeinit(const int reason = 0) { }")
+	if hasRule(goodDefault.Findings, "event-handler/ondeinit-signature") {
+		t.Errorf("OnDeinit with a default reason should not be flagged, got %+v", goodDefault.Findings)
+	}
 }
 
 // The parameter list is extracted with balanced parens, not truncated at the
@@ -168,6 +173,18 @@ func TestEventHandlerReturnTypes(t *testing.T) {
 			t.Errorf("src %q: want flag=%v for %s, got %+v", c.src, c.flag, c.rule, rep.Findings)
 		}
 	}
+
+	rep := Run("r.mq5", "double OnInit() { return 0; }")
+	for _, f := range rep.Findings {
+		if f.RuleID == "event-handler/oninit-return" {
+			want := "Declare it as int OnInit(...) or void OnInit(...)."
+			if f.Suggest != want {
+				t.Errorf("OnInit return suggestion: want %q, got %q", want, f.Suggest)
+			}
+			return
+		}
+	}
+	t.Fatal("expected event-handler/oninit-return finding")
 }
 
 func TestStructuralBalance(t *testing.T) {

@@ -84,47 +84,72 @@ func returnTypeOf(code string, nameOffset int) string {
 	return code[start+1 : end+1]
 }
 
+type handlerMatch struct {
+	args        string
+	trimmedArgs string
+	offset      int
+	ok          bool
+}
+
 func (r eventHandlerRule) Check(src *Source) []finding.Finding {
 	var out []finding.Finding
 	code := src.Code
+	handlers := make(map[string]handlerMatch)
+	getHandler := func(name string) handlerMatch {
+		if match, ok := handlers[name]; ok {
+			return match
+		}
+		args, offset, ok := handlerDef(code, name)
+		match := handlerMatch{
+			args:        args,
+			trimmedArgs: strings.TrimSpace(args),
+			offset:      offset,
+			ok:          ok,
+		}
+		handlers[name] = match
+		return match
+	}
 
 	// Handlers that take no parameters.
 	for _, name := range []string{"OnTick", "OnStart", "OnTester", "OnTesterInit", "OnTesterDeinit", "OnTesterPass"} {
-		if args, off, ok := handlerDef(code, name); ok && strings.TrimSpace(args) != "" {
-			line, col := src.posAt(off)
+		match := getHandler(name)
+		if match.ok && (match.trimmedArgs != "" && match.trimmedArgs != "void") {
+			line, col := src.posAt(match.offset)
 			out = append(out, finding.Finding{
 				File: src.Path, Line: line, Column: col,
 				Severity: finding.Error,
 				RuleID:   "event-handler/" + strings.ToLower(name) + "-params",
-				Message:  name + "() must take no parameters; found \"" + strings.TrimSpace(args) + "\".",
-				Suggest:  "Declare it as void " + name + "().",
+				Message:  name + "() must take no parameters; found \"" + match.trimmedArgs + "\".",
+				Suggest:  "Declare it as void " + name + "() / void " + name + "(void)",
 				Pass:     finding.PassStatic,
 			})
 		}
 	}
 
 	// OnInit takes no parameters and should return int (or void).
-	if args, off, ok := handlerDef(code, "OnInit"); ok && strings.TrimSpace(args) != "" {
-		line, col := src.posAt(off)
+	onInit := getHandler("OnInit")
+	if onInit.ok && (onInit.trimmedArgs != "" && onInit.trimmedArgs != "void") {
+		line, col := src.posAt(onInit.offset)
 		out = append(out, finding.Finding{
 			File: src.Path, Line: line, Column: col,
 			Severity: finding.Error,
 			RuleID:   "event-handler/oninit-params",
-			Message:  "OnInit() must take no parameters; found \"" + strings.TrimSpace(args) + "\".",
-			Suggest:  "Declare it as int OnInit().",
+			Message:  "OnInit() must take no parameters or void parameter; found \"" + onInit.trimmedArgs + "\".",
+			Suggest:  "Declare it as int OnInit() / int OnInit(void).",
 			Pass:     finding.PassStatic,
 		})
 	}
 
 	// OnDeinit requires exactly one `const int reason` parameter.
-	if args, off, ok := handlerDef(code, "OnDeinit"); ok {
-		if !deinitParamOK(args) {
-			line, col := src.posAt(off)
+	onDeinit := getHandler("OnDeinit")
+	if onDeinit.ok {
+		if !deinitParamOK(onDeinit.args) {
+			line, col := src.posAt(onDeinit.offset)
 			out = append(out, finding.Finding{
 				File: src.Path, Line: line, Column: col,
 				Severity: finding.Error,
 				RuleID:   "event-handler/ondeinit-signature",
-				Message:  "OnDeinit() must take a single 'const int' parameter; found \"" + strings.TrimSpace(args) + "\".",
+				Message:  "OnDeinit() must take a single 'const int' parameter; found \"" + onDeinit.trimmedArgs + "\".",
 				Suggest:  "Declare it as void OnDeinit(const int reason).",
 				Pass:     finding.PassStatic,
 			})
@@ -138,28 +163,30 @@ func (r eventHandlerRule) Check(src *Source) []finding.Finding {
 		{"OnTester", "double"},
 		{"OnTesterInit", "void"}, {"OnTesterDeinit", "void"}, {"OnTesterPass", "void"},
 	} {
-		_, off, ok := handlerDef(code, h.name)
-		if !ok {
+		match := getHandler(h.name)
+		if !match.ok {
 			continue
 		}
-		got := returnTypeOf(code, off)
+		got := returnTypeOf(code, match.offset)
 		if got == "" || got == h.want {
 			continue // undeterminable → skip (no false positive); or already correct
 		}
 		if h.name == "OnInit" && got == "void" {
 			continue // int or void both valid for OnInit
 		}
-		line, col := src.posAt(off)
+		line, col := src.posAt(match.offset)
 		want := h.want
+		suggest := "Declare it as " + h.want + " " + h.name + "(...)."
 		if h.name == "OnInit" {
 			want = "int (or void)"
+			suggest = "Declare it as int " + h.name + "(...) or void " + h.name + "(...)."
 		}
 		out = append(out, finding.Finding{
 			File: src.Path, Line: line, Column: col,
 			Severity: finding.Error,
 			RuleID:   "event-handler/" + strings.ToLower(h.name) + "-return",
 			Message:  h.name + "() must return " + want + "; found \"" + got + "\".",
-			Suggest:  "Declare it as " + h.want + " " + h.name + "(...).",
+			Suggest:  suggest,
 			Pass:     finding.PassStatic,
 		})
 	}
@@ -167,13 +194,21 @@ func (r eventHandlerRule) Check(src *Source) []finding.Finding {
 }
 
 // deinitParamOK reports whether the OnDeinit parameter list is exactly one
-// `const int <id>` parameter. A second parameter (a comma) or a different type
-// is rejected.
+// `const int <id>` parameter, optionally with a default value. A second
+// parameter (a comma) or a different type is rejected.
 func deinitParamOK(args string) bool {
 	if strings.Contains(args, ",") {
 		return false // more than one parameter
 	}
-	fields := strings.Fields(args)
+	parts := strings.SplitN(args, "=", 2)
+	fields := strings.Fields(parts[0])
 	// Expect exactly: const int <name>.
-	return len(fields) == 3 && fields[0] == "const" && fields[1] == "int"
+	if len(fields) != 3 || fields[0] != "const" || fields[1] != "int" {
+		return false
+	}
+	if len(parts) == 1 {
+		return true
+	}
+	defaultValue := strings.TrimSpace(parts[1])
+	return defaultValue != "" && !strings.Contains(defaultValue, "=")
 }
