@@ -40,6 +40,12 @@ func (Noop) Compile(_ context.Context, path string) ([]finding.Finding, error) {
 	}}, nil
 }
 
-// Default returns the backend to use. For now this is always the Noop stub;
-// backend selection (env/flags) will grow here.
-func Default() Backend { return Noop{} }
+// Default returns the backend to use: the Parallels backend when it is
+// configured (MQLS_VM/MQLS_METAEDITOR set) and the VM is reachable, otherwise
+// the Noop stub. Backend selection grows here.
+func Default() Backend {
+	if p := newParallels(); p != nil && p.Available() {
+		return p
+	}
+	return Noop{}
+}
