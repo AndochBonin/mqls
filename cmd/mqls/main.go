@@ -2,7 +2,7 @@
 //
 // Usage:
 //
-//	mqls validate <file.mq5> [--json]   run the fast static lint pass
+//	mqls lint <file.mq5> [--json]   run the fast static lint pass
 //	mqls compile  <file.mq5> [--json]   run the authoritative compile pass
 //
 // Every command emits the same Report schema. With --json the output is a
@@ -16,6 +16,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"log/slog"
 	"os"
 
 	"github.com/AndochBonin/mqls/internal/compile"
@@ -52,8 +53,8 @@ func run(args []string) int {
 	}
 
 	switch cmd {
-	case "validate":
-		return doValidate(path, jsonOut)
+	case "lint":
+		return doLint(path, jsonOut)
 	case "compile":
 		return doCompile(path, jsonOut)
 	default:
@@ -63,34 +64,43 @@ func run(args []string) int {
 	}
 }
 
-func doValidate(path string, jsonOut bool) int {
+func doLint(path string, jsonOut bool) int {
+	pass := "Lint"
 	raw, err := os.ReadFile(path)
 	if err != nil {
-		return fail(path, err, jsonOut)
+		return fail(pass, path, err, jsonOut)
 	}
 	report := lint.Run(path, string(raw))
-	return emit(report, jsonOut)
+	return emit(pass, report, jsonOut)
 }
 
 func doCompile(path string, jsonOut bool) int {
+	pass := "Compile"
 	if _, err := os.Stat(path); err != nil {
-		return fail(path, err, jsonOut)
+		return fail(pass, path, err, jsonOut)
 	}
+
 	backend := compile.Default()
+	if backend.Available() {
+		slog.Info(pass, "backend", backend.Name(), "status", "available")
+	} else {
+		slog.Warn(pass, "backend", backend.Name(), "status", "unavailable")
+	}
+
 	findings, err := backend.Compile(context.Background(), path)
 	if err != nil {
-		return fail(path, err, jsonOut)
+		return fail(pass, path, err, jsonOut)
 	}
-	return emit(finding.NewReport(path, findings), jsonOut)
+	return emit("Compile", finding.NewReport(path, findings), jsonOut)
 }
 
-func emit(report finding.Report, jsonOut bool) int {
+func emit(pass string, report finding.Report, jsonOut bool) int {
 	if jsonOut {
 		enc := json.NewEncoder(os.Stdout)
 		enc.SetIndent("", "  ")
 		_ = enc.Encode(report)
 	} else {
-		printHuman(report)
+		logOut(pass, report)
 	}
 	if !report.OK {
 		return 1
@@ -98,27 +108,37 @@ func emit(report finding.Report, jsonOut bool) int {
 	return 0
 }
 
-func printHuman(r finding.Report) {
-	if len(r.Findings) == 0 {
-		fmt.Printf("OK  %s — no findings\n", r.File)
-		return
-	}
+func logOut(pass string, r finding.Report) {
 	for _, f := range r.Findings {
-		fmt.Printf("%-7s %s:%d:%d  [%s] %s\n",
-			f.Severity, f.File, f.Line, f.Column, f.RuleID, f.Message)
-		if f.Suggest != "" {
-			fmt.Printf("        ↳ %s\n", f.Suggest)
+		logLine := []any{
+			"pass", f.Pass,
+			"severity", fmt.Sprintf("%s", f.Severity),
+			"file", f.File,
+			"line", fmt.Sprintf("%d", f.Line),
+			"column", fmt.Sprintf("%d", f.Column),
+			"rule", f.RuleID,
+			"message", f.Message,
+			"suggestion", f.Suggest}
+
+		switch f.Severity {
+		case finding.Info:
+			slog.Info("Finding", logLine...)
+		case finding.Warning:
+			slog.Warn("Finding", logLine...)
+		case finding.Error:
+			slog.Error("Finding", logLine...)
 		}
 	}
-	status := "PASS"
-	if !r.OK {
-		status = "FAIL"
+
+	if r.OK {
+		slog.Info(pass, "status", "OK", "file", r.File, "findings", len(r.Findings))
+	} else {
+		slog.Warn(pass, "status", "FAIL", "file", r.File, "findings", len(r.Findings))
 	}
-	fmt.Printf("%s  %s — %d finding(s)\n", status, r.File, len(r.Findings))
 }
 
 // fail emits a single error finding for an I/O-level problem.
-func fail(path string, err error, jsonOut bool) int {
+func fail(pass string, path string, err error, jsonOut bool) int {
 	report := finding.NewReport(path, []finding.Finding{{
 		File:     path,
 		Severity: finding.Error,
@@ -126,7 +146,7 @@ func fail(path string, err error, jsonOut bool) int {
 		Message:  err.Error(),
 		Pass:     finding.PassStatic,
 	}})
-	emit(report, jsonOut)
+	emit(pass, report, jsonOut)
 	return 1
 }
 
@@ -134,7 +154,7 @@ func usage() {
 	fmt.Fprint(os.Stderr, `mqls — MQL5 validation harness
 
 usage:
-  mqls validate <file.mq5> [--json]   fast static lint pass
+  mqls lint <file.mq5> [--json]   fast static lint pass
   mqls compile  <file.mq5> [--json]   authoritative compile pass
 `)
 }
