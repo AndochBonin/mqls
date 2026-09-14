@@ -21,7 +21,7 @@ message, suggestion) that the agent can act on directly in its next turn.
 ## Usage
 
 ```
-mqls validate <file.mq5> [--json]   fast static lint pass
+mqls lint <file.mq5> [--json]   fast static lint pass
 mqls compile  <file.mq5> [--json]   authoritative compile pass
 ```
 
