@@ -8,7 +8,7 @@ message, suggestion) that the agent can act on directly in its next turn.
 
 ## Two passes
 
-1. **Static pass** (`mqls validate`) — fast, no compiler. A curated set of
+1. **Static pass** (`mqls lint`) — fast, no compiler. A curated set of
    high-signal, near-zero-false-positive rules for the footguns an LLM produces
    most: MQL4↔MQL5 API confusion, wrong event-handler signatures, and
    structural (brace/bracket/paren) balance. Runs in-process, no spawn cost.
@@ -31,7 +31,7 @@ any error-severity finding.
 
 ```
 go build -o mqls ./cmd/mqls
-./mqls validate strategy.mq5 --json
+./mqls lint strategy.mq5 --json
 ```
 
 ## Report schema
@@ -57,7 +57,7 @@ go build -o mqls ./cmd/mqls
 ## Layout
 
 ```
-cmd/mqls            CLI entry (validate | compile)
+cmd/mqls            CLI entry (lint | compile)
 internal/finding    shared Finding / Report schema (both passes)
 internal/lint       static pass: Rule interface, engine, rule packs
 internal/compile    compile pass: Backend interface + noop stub
